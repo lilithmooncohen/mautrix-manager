@@ -70,6 +70,21 @@ function parseMultipart(data: string, boundary: string): parsedRequestBody {
 	return output
 }
 
+function getHeader(
+	headers: OnBeforeSendHeadersListenerDetails["requestHeaders"],
+	name: string,
+): string | undefined {
+	// Header names are case-insensitive, and neither the casing used on the wire nor the
+	// casing used in the login flow spec is consistent, so don't do an exact key lookup.
+	const lowerName = name.toLowerCase()
+	for (const [key, value] of Object.entries(headers)) {
+		if (key.toLowerCase() === lowerName) {
+			return value
+		}
+	}
+	return undefined
+}
+
 function parseRequestBody(details: OnBeforeSendHeadersListenerDetails): parsedRequestBody | null {
 	if (
 		details.resourceType !== "xhr" ||
@@ -78,7 +93,11 @@ function parseRequestBody(details: OnBeforeSendHeadersListenerDetails): parsedRe
 	) {
 		return null
 	}
-	const contentType = details.requestHeaders["Content-Type"].split(";")[0]
+	const contentTypeHeader = getHeader(details.requestHeaders, "Content-Type")
+	if (!contentTypeHeader) {
+		return null
+	}
+	const contentType = contentTypeHeader.split(";")[0]
 	if (
 		contentType !== "application/json" &&
 		contentType !== "application/x-www-form-urlencoded" &&
@@ -96,7 +115,7 @@ function parseRequestBody(details: OnBeforeSendHeadersListenerDetails): parsedRe
 	} else if (contentType === "application/x-www-form-urlencoded") {
 		return Object.fromEntries(new URLSearchParams(bodyString))
 	} else if (contentType === "multipart/form-data") {
-		const boundary = details.requestHeaders["Content-Type"].split("; boundary=")[1]
+		const boundary = contentTypeHeader.split("; boundary=")[1]
 		return parseMultipart(bodyString, boundary)
 	} else {
 		return null
@@ -205,8 +224,9 @@ function makeRequestWatcher(
 			}
 			for (const { field, source } of fieldList.fields) {
 				if (source.type == "request_header") {
-					if (details.requestHeaders && source.name in details.requestHeaders) {
-						output[field.id] = details.requestHeaders[source.name]
+					const header = getHeader(details.requestHeaders, source.name)
+					if (header !== undefined) {
+						output[field.id] = header
 						foundAny = true
 					}
 				} else if (source.type == "request_body") {
